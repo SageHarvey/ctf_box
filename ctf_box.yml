@@ -1,0 +1,83 @@
+---
+- hosts: localhost
+  tasks:
+    - name: Load vars
+      include_vars:
+        file: packages.yml
+    - name: Install extra packages
+      become: true
+      apt:
+        update_cache: true
+        cache_valid_time: 86400 # 1 day
+        name: "{{ packages }}"
+        state: latest
+    - name: Prep for VS Code install
+      become: true
+      apt:
+        name:
+          - curl
+          - gpg
+          - gnupg2
+          - software-properties-common
+          - apt-transport-https
+        state: latest
+    - name: Check for MS GPG key
+      stat:
+        path: /etc/apt/trusted.gpg.d/microsoft.gpg
+      register: ms_gpg_key
+    - name: Download MS GPG key
+      get_url:
+        url: https://packages.microsoft.com/keys/microsoft.asc
+        dest: /tmp/microsoft.asc
+      when: not ms_gpg_key.state.exists
+    - name: De-armor MS GPG key
+      command: gpg --dearmor /tmp/microsoft.asc > microsoft.gpg
+      delegate_to: localhost
+      when: not ms_gpg_key.state.exists
+    - name: Import MS GPG key
+      become: true
+      command: mv /tmp/microsoft.gpg /etc/apt/trusted.gpg.d/microsoft.gpg
+      when: not ms_gpg_key.state.exists
+      ansible.builtin.apt_key:
+        url: https://packages.microsoft.com/keys/microsoft.asc
+        keyring: /etc/apt/trusted.gpg.d/microsoft.gpg
+          #      command: curl https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > microsoft.gpg && install -o root -g root -m 644 microsoft.gpg /etc/apt/trusted.gpg.d/
+          #      delegate_to: localhost
+          #      when: not ms_gpg_key.stat.exists
+    - name: Check for VSCode repo
+      stat:
+        path: /etc/apt/sources.list.d/vscode.list
+      register: vscode_repo
+    - name: Add VSCode repo
+      become: true
+      command: echo "deb [arch=amd64] https://packages.microsoft.com/repos/vscode stable main" | sudo tee /etc/apt/sources.list.d/vscode.list
+      delegate_to: localhost
+      when: not vscode_repo.stat.exists
+    - name: Update and install VS Code
+      become: true
+      apt:
+        update_cache: true
+        name:
+          - code
+        state: latest
+    - name: Check if Discord is installed
+      command: dpkg -s discord
+      delegate_to: localhost
+      register: discord_present
+      ignore_errors: true
+    - name: Download Discord
+      command: wget -O /tmp/discord.deb https://discord.com/api/download?platform=linux&format=deb
+      delegate_to: localhost
+      when: discord_present is failed
+    - name: Let download complete
+      pause:
+        seconds: 90
+    - name: Install discord
+      become: true
+      command: dpkg -i /tmp/discord.deb 
+      when: discord_present is failed
+    - name: Install authy
+      community.general.snap:
+        name: authy
+        state: present
+

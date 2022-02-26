@@ -1,0 +1,7 @@
+---
+packages:
+  - docker.io
+  - docker-compose
+  - glances
+  - htop
+  - snap
