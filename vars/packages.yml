@@ -4,4 +4,5 @@ packages:
   - docker-compose
   - glances
   - htop
-  - snap
+  - snapd
+  - gdebi

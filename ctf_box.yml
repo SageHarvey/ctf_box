@@ -1,18 +1,35 @@
 ---
 - hosts: localhost
+  become: yes
   tasks:
     - name: Load vars
       include_vars:
         file: packages.yml
     - name: Install extra packages
-      become: true
       apt:
         update_cache: true
         cache_valid_time: 86400 # 1 day
         name: "{{ packages }}"
         state: latest
+    - name: Add snap to path
+      lineinfile:
+        dest: /etc/environment
+        line: "PATH=$PATH:/snap/bin"
+    - name: Enable snapd
+      service:
+        name: snapd
+        enabled: yes
+        state: started
+    - name: Enable apparmor
+      service:
+        name: apparmor
+        enabled: yes
+        state: started
+    - name: Install snap core
+      community.general.snap:
+        name: core
+        state: present
     - name: Prep for VS Code install
-      become: true
       apt:
         name:
           - curl
@@ -29,55 +46,59 @@
       get_url:
         url: https://packages.microsoft.com/keys/microsoft.asc
         dest: /tmp/microsoft.asc
-      when: not ms_gpg_key.state.exists
+      when: not ms_gpg_key.stat.exists
     - name: De-armor MS GPG key
-      command: gpg --dearmor /tmp/microsoft.asc > microsoft.gpg
+      command: gpg --dearmor /tmp/microsoft.asc > /tmp/microsoft.gpg
       delegate_to: localhost
-      when: not ms_gpg_key.state.exists
+      when: not ms_gpg_key.stat.exists
     - name: Import MS GPG key
-      become: true
       command: mv /tmp/microsoft.gpg /etc/apt/trusted.gpg.d/microsoft.gpg
-      when: not ms_gpg_key.state.exists
-      ansible.builtin.apt_key:
-        url: https://packages.microsoft.com/keys/microsoft.asc
-        keyring: /etc/apt/trusted.gpg.d/microsoft.gpg
-          #      command: curl https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > microsoft.gpg && install -o root -g root -m 644 microsoft.gpg /etc/apt/trusted.gpg.d/
-          #      delegate_to: localhost
-          #      when: not ms_gpg_key.stat.exists
+      when: not ms_gpg_key.stat.exists
     - name: Check for VSCode repo
       stat:
         path: /etc/apt/sources.list.d/vscode.list
       register: vscode_repo
     - name: Add VSCode repo
-      become: true
-      command: echo "deb [arch=amd64] https://packages.microsoft.com/repos/vscode stable main" | sudo tee /etc/apt/sources.list.d/vscode.list
+      lineinfile:
+        path: /etc/apt/sources.list.d/vscode.list
+        line: deb [arch=amd64] https://packages.microsoft.com/repos/vscode stable main
+        create: yes
+        state: present
+          #      command: echo "deb [arch=amd64] https://packages.microsoft.com/repos/vscode stable main" > /etc/apt/sources.list.d/vscode.list
       delegate_to: localhost
       when: not vscode_repo.stat.exists
     - name: Update and install VS Code
-      become: true
       apt:
         update_cache: true
         name:
           - code
         state: latest
     - name: Check if Discord is installed
-      command: dpkg -s discord
+      command: dpkg-query -W discord
       delegate_to: localhost
-      register: discord_present
+      register: discord_installed
+      failed_when: discord_installed.rc > 1
+      changed_when: discord_installed.rc == 1
       ignore_errors: true
-    - name: Download Discord
-      command: wget -O /tmp/discord.deb https://discord.com/api/download?platform=linux&format=deb
-      delegate_to: localhost
-      when: discord_present is failed
-    - name: Let download complete
-      pause:
-        seconds: 90
     - name: Install discord
-      become: true
-      command: dpkg -i /tmp/discord.deb 
-      when: discord_present is failed
+      community.general.snap:
+        name: discord
+        state: present
+      when: discord_installed.rc == 1
+    - name: Snap connect discord:system-observe
+      command: snap connect discord:system-observe
+      delegate_to: localhost
+      when: discord_installed.rc == 1
+    - name: Check if authy installed
+      command: dpkg-query -W authy
+      delegate_to: localhost
+      register: authy_installed
+      failed_when: authy_installed.rc > 1
+      changed_when: authy_installed.rc == 1
+      ignore_errors: true
     - name: Install authy
       community.general.snap:
         name: authy
         state: present
+      when: authy_installed.rc ==1
 
